@@ -21,27 +21,19 @@ Provides sync and async clients to communicate with redis servers using [nim-red
 
 ```nim
   let con = await openAsync("localhost", 6379.Port)
-  echo "Opened async"
-  var res = await con.execCommand("PING", @[])
-  echo res
-  res = await con.execCommand("SET", @["auser", "avalue"])
-  echo res
-  res = await con.execCommand("GET", @["auser"])
-  echo res
-  res = await con.execCommand("SCAN", @["0"])
-  echo res
-  res = await con.execCommand("SET", @["auser", "avalue"])
-  echo res
-  res = await con.execCommand("GET", @["auser"])
-  echo res
-  res = await con.execCommand("SCAN", @["0"])
-  echo res 
+  echo await con.execCommand("PING", @[])
+  echo await con.execCommand("SET", @["auser", "avalue"])
+  echo await con.execCommand("GET", @["auser"])
+  echo await con.execCommand("SCAN", @["0"])
+  echo await con.execCommand("SET", @["auser", "avalue"])
+  echo await con.execCommand("GET", @["auser"])
+  echo await con.execCommand("SCAN", @["0"])
 
   await con.enqueueCommand("PING", @[])
   await con.enqueueCommand("PING", @[])
   await con.enqueueCommand("PING", @[])
-  res = await con.commitCommands()
-  echo res
+  echo await con.commitCommands()
+ 
 ```
 
 
