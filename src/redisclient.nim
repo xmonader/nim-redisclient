@@ -1,7 +1,7 @@
 # redisclient
 # Copyright Ahmed T. Youssef
 # nim redis client 
-import redisparser, strformat, tables, json, strutils, sequtils, hashes, net, asyncdispatch, asyncnet, os, strutils, parseutils, deques, options
+import redisparser, strformat, tables, json, strutils, sequtils, hashes, net, asyncdispatch, asyncnet, os, strutils, parseutils, deques, options, net
 
 
 type
@@ -14,19 +14,27 @@ type
 
   AsyncRedis* = ref object of RedisBase[asyncnet.AsyncSocket]
     pipeline*: seq[RedisValue]
-  
-proc open*(host = "localhost", port = 6379.Port): Redis =
+
+proc SSLifyRedisConnectionNoVerify(redis: var Redis|AsyncRedis) = 
+  let ctx = newContext(verifyMode=CVerifyNone)
+  ctx.wrapSocket(redis.socket)
+
+proc open*(host = "localhost", port = 6379.Port, ssl=false): Redis =
   result = Redis(
     socket: newSocket(buffered = true),
   )
   result.pipeline = @[]
+  if ssl == true:
+    SSLifyRedisConnectionNoVerify(result)
   result.socket.connect(host, port)
 
-proc openAsync*(host = "localhost", port = 6379.Port): Future[AsyncRedis] {.async.} =
+proc openAsync*(host = "localhost", port = 6379.Port, ssl=false): Future[AsyncRedis] {.async.} =
   ## Open an asynchronous connection to a redis server.
   result = AsyncRedis(
     socket: newAsyncSocket(buffered = true),
   )
+  if ssl == true:
+    SSLifyRedisConnectionNoVerify(result)
   result.pipeline = @[]
   await result.socket.connect(host, port)
 
@@ -50,6 +58,8 @@ proc readStream(this:Redis|AsyncRedis, breakAfter:string): Future[string] {.mult
   return data
 
 proc readMany(this:Redis|AsyncRedis, count:int=1): Future[string] {.multisync.} =
+  if count == 0:
+    return ""
   let data = await this.receiveManaged(count)
   return data
 
@@ -69,10 +79,13 @@ proc readForm(this:Redis|AsyncRedis): Future[string] {.multisync.} =
       return form
     elif b == "$":
       let bulklenstr = await this.readStream(CRLF)
-      form &= bulklenstr
       let bulklenI = parseInt(bulklenstr.strip()) 
-      form &= await this.readMany(bulklenI)
-      form &= await this.readStream(CRLF)
+      form &= bulklenstr
+      if bulklenI == -1:
+        form &= await this.readStream(CRLF)
+      else:
+        form &= await this.readMany(bulklenI)
+        form &= await this.readStream(CRLF)
       return form
     elif b == "*":
         let lenstr = await this.readStream(CRLF)
