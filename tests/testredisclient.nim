@@ -41,5 +41,12 @@ proc testAsync() {.async.} =
  
 
 
-testSync()
-waitFor testAsync()
+proc testHighlevelAPI() =
+  let con = open("localhost", 6379.Port)
+  echo con.ping()
+  discard con.setk("username", "ahmed")
+  echo con.get("username")
+
+# testSync()
+# waitFor testAsync()
+testHighlevelAPI()
