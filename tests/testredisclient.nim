@@ -47,6 +47,11 @@ proc testHighlevelAPI() =
   discard con.setk("username", "ahmed")
   echo con.get("username")
 
+<<<<<<< HEAD
 # testSync()
 # waitFor testAsync()
+=======
+testSync()
+waitFor testAsync()
+>>>>>>> Add highlevel api from the official nim client
 testHighlevelAPI()

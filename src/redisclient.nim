@@ -17,6 +17,7 @@ type
 
 
     
+
 when defined(ssl):
   proc SSLifyRedisConnectionNoVerify(redis: var Redis|AsyncRedis) = 
     let ctx = newContext(verifyMode=CVerifyNone)
@@ -172,29 +173,31 @@ proc keys*(this: Redis | AsyncRedis, pattern: string): Future[RedisValue] {.mult
   return await this.execCommand("KEYS", pattern)
 
 
-# proc scan*(this: Redis | AsyncRedis, cursor: RedisCursor): Future[RedisValue] {.multisync.} =
-#   ## Find all keys matching the given pattern and yield it to client in portions
-#   ## using default Redis values for MATCH and COUNT parameters
-#   return await this.execCommand("SCAN", $cursor.position)
-#   let reply = awaitthis.readArray()
-#   cursor.position = strutils.parseBiggestInt(reply[0])
-#   result = reply[1..high(reply)]
+proc scan*(this: Redis | AsyncRedis, position: BiggestInt): Future[RedisValue] {.multisync.} =
+  ## Find all keys matching the given pattern and yield it to client in portions
+  ## using default Redis values for MATCH and COUNT parameters
+  return await this.execCommand("SCAN", $position)
 
-# proc scan*(this: Redis | AsyncRedis, cursor: RedisCursor, pattern: string): Future[RedisValue] {.multisync.} =
-#   ## Find all keys matching the given pattern and yield it to client in portions
-#   ## using cursor as a client query identifier. Using default Redis value for COUNT argument
-#   return await this.execCommand("SCAN", $cursor.position, @["MATCH", pattern])
-#   let reply = awaitthis.readArray()
-#   cursor.position = strutils.parseBiggestInt(reply[0])
-#   result = reply[1..high(reply)]
+proc scan*(this: Redis | AsyncRedis, position: BiggestInt, pattern: string): Future[RedisValue] {.multisync.} =
+  ## Find all keys matching the given pattern and yield it to client in portions
+  ## using cursor as a client query identifier. Using default Redis value for COUNT argument
+  return await this.execCommand("SCAN", $position, @["MATCH", pattern])
 
-# proc scan*(this: Redis | AsyncRedis, cursor: RedisCursor, pattern: string, count: int): Future[RedisValue] {.multisync.} =
-#   ## Find all keys matching the given pattern and yield it to client in portions
-#   ## using cursor as a client query identifier.
-#   return await this.execCommand("SCAN", $cursor.position, @["MATCH", pattern, "COUNT", $count])
-#   let reply = awaitthis.readArray()
-#   cursor.position = strutils.parseBiggestInt(reply[0])
-#   result = reply[1..high(reply)]
+proc scan*(this: Redis | AsyncRedis, position: BiggestInt, pattern: string, count: int): Future[RedisValue] {.multisync.} =
+  ## Find all keys matching the given pattern and yield it to client in portions
+  ## using cursor as a client query identifier.
+  return await this.execCommand("SCAN", $position, @["MATCH", pattern, "COUNT", $count])
+
+
+proc zdbScan*(this: Redis | AsyncRedis, position=""): Future[RedisValue] {.multisync.} =
+  ## Find all keys matching the given pattern and yield it to client in portions
+  ## using default Redis values for MATCH and COUNT parameters
+  if position == "":
+    return await this.execCommand("SCAN")
+  else:
+    return await this.execCommand("SCAN", position)
+
+
 
 proc move*(this: Redis | AsyncRedis, key: string, db: int): Future[bool] {.multisync.} =
   ## Move a key to another database. Returns `true` on a successful move.
