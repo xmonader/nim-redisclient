@@ -47,11 +47,16 @@ proc testHighlevelAPI() =
   discard con.setk("username", "ahmed")
   echo con.get("username")
 
-<<<<<<< HEAD
+proc testZdbAPI() {.async.} =
+  let con = await openAsync("playground.hub.grid.tf", 9910.Port)
+  echo await con.ping()
+  echo await con.execCommand("SET", @["username", "ahmed"])
+  echo await con.get("username")
+  # echo $con.zdbScan()
+
 # testSync()
 # waitFor testAsync()
-=======
-testSync()
-waitFor testAsync()
->>>>>>> Add highlevel api from the official nim client
-testHighlevelAPI()
+# testHighlevelAPI()
+waitFor testZdbAPI()
+
+
