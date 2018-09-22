@@ -14,18 +14,20 @@ type
 
   AsyncRedis* = ref object of RedisBase[asyncnet.AsyncSocket]
     pipeline*: seq[RedisValue]
-
-proc SSLifyRedisConnectionNoVerify(redis: var Redis|AsyncRedis) = 
-  let ctx = newContext(verifyMode=CVerifyNone)
-  ctx.wrapSocket(redis.socket)
+    
+when defined(ssl):
+  proc SSLifyRedisConnectionNoVerify(redis: var Redis|AsyncRedis) = 
+    let ctx = newContext(verifyMode=CVerifyNone)
+    ctx.wrapSocket(redis.socket)
 
 proc open*(host = "localhost", port = 6379.Port, ssl=false): Redis =
   result = Redis(
     socket: newSocket(buffered = true),
   )
   result.pipeline = @[]
-  if ssl == true:
-    SSLifyRedisConnectionNoVerify(result)
+  when defined(ssl):
+    if ssl == true:
+      SSLifyRedisConnectionNoVerify(result)
   result.socket.connect(host, port)
 
 proc openAsync*(host = "localhost", port = 6379.Port, ssl=false): Future[AsyncRedis] {.async.} =
@@ -33,8 +35,9 @@ proc openAsync*(host = "localhost", port = 6379.Port, ssl=false): Future[AsyncRe
   result = AsyncRedis(
     socket: newAsyncSocket(buffered = true),
   )
-  if ssl == true:
-    SSLifyRedisConnectionNoVerify(result)
+  when defined(ssl):
+    if ssl == true:
+      SSLifyRedisConnectionNoVerify(result)
   result.pipeline = @[]
   await result.socket.connect(host, port)
 
