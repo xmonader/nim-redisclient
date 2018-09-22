@@ -48,11 +48,14 @@ proc testHighlevelAPI() =
   echo con.get("username")
 
 proc testZdbAPI() {.async.} =
-  let con = await openAsync("playground.hub.grid.tf", 9910.Port)
+  let con = await openAsync("localhost", 9900.Port)
   echo await con.ping()
   echo await con.execCommand("SET", @["username", "ahmed"])
   echo await con.get("username")
-  # echo $con.zdbScan()
+
+  for i in countup(1, 10000):
+    await con.execCommand("SET", @["key"& $i, $i])
+  echo await con.zdbScan("key2")
 
 # testSync()
 # waitFor testAsync()
