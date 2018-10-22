@@ -29,8 +29,6 @@ proc open*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Redis =
   )
   result.pipeline = @[]
   result.timeout = timeout
-  if ssl == true:
-    SSLifyRedisConnectionNoVerify(result)
   when defined(ssl):
     if ssl == true:
       SSLifyRedisConnectionNoVerify(result)
