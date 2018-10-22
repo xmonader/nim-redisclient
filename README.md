@@ -51,4 +51,4 @@ You can use `enqueueCommand` and `commitCommands` to make use of redis pipelinin
 ## Roadmap
 - [X] Pipelining
 - [X] Async APIs
-- [] Friendlier API for builtin redis commands
+- [X] Friendlier API for builtin redis commands (adapted code from https://github.com/nim-lang/redis)
