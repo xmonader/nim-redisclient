@@ -8,6 +8,7 @@ type
   RedisBase[TSocket] = ref object of RootObj
     socket: TSocket
     connected: bool
+    timeout*: int
 
   Redis* = ref object of RedisBase[net.Socket]
     pipeline*: seq[RedisValue]
@@ -19,16 +20,18 @@ proc SSLifyRedisConnectionNoVerify(redis: var Redis|AsyncRedis) =
   let ctx = newContext(verifyMode=CVerifyNone)
   ctx.wrapSocket(redis.socket)
 
-proc open*(host = "localhost", port = 6379.Port, ssl=false): Redis =
+proc open*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Redis =
   result = Redis(
     socket: newSocket(buffered = true),
   )
   result.pipeline = @[]
+  result.timeout = timeout
   if ssl == true:
     SSLifyRedisConnectionNoVerify(result)
   result.socket.connect(host, port)
+  result.connected = true
 
-proc openAsync*(host = "localhost", port = 6379.Port, ssl=false): Future[AsyncRedis] {.async.} =
+proc openAsync*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Future[AsyncRedis] {.async.} =
   ## Open an asynchronous connection to a redis server.
   result = AsyncRedis(
     socket: newAsyncSocket(buffered = true),
@@ -36,18 +39,23 @@ proc openAsync*(host = "localhost", port = 6379.Port, ssl=false): Future[AsyncRe
   if ssl == true:
     SSLifyRedisConnectionNoVerify(result)
   result.pipeline = @[]
+  result.timeout = timeout
   await result.socket.connect(host, port)
+  result.connected = true
 
 
 proc receiveManaged*(this:Redis|AsyncRedis, size=1): Future[string] {.multisync.} =
-
   result = newString(size)
   when this is Redis:
-    discard this.socket.recv(result, size)
+    if this.timeout == 0:
+      discard this.socket.recv(result, size)
+    else:
+      discard this.socket.recv(result, size, this.timeout)
   else:
     discard await this.socket.recvInto(addr result[0], size)
   return result
     
+
 proc readStream(this:Redis|AsyncRedis, breakAfter:string): Future[string] {.multisync.} =
   var data = ""
   while true:
