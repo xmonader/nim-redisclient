@@ -3,7 +3,6 @@
 # nim redis client 
 import redisparser, strformat, tables, json, strutils, sequtils, hashes, net, asyncdispatch, asyncnet, os, strutils, parseutils, deques, options, net
 
-
 type
   RedisBase[TSocket] = ref object of RootObj
     socket: TSocket
@@ -95,10 +94,17 @@ proc readForm(this:Redis|AsyncRedis): Future[string] {.multisync.} =
       let bulklenI = parseInt(bulklenstr.strip()) 
       form &= bulklenstr
       if bulklenI == -1:
-        form &= await this.readStream(CRLF)
+        form &= CRLF
+      # elif bulklenI == 0:
+      #   echo "IN HERE.."
+      #   form &= await this.readMany(1)
+      #   echo fmt"FORM NOW >{form}<"
+      #   form &= await this.readStream(CRLF)
+        # echo fmt"FORM NOW >{form}<"
       else:
         form &= await this.readMany(bulklenI)
         form &= await this.readStream(CRLF)
+
       return form
     elif b == "*":
         let lenstr = await this.readStream(CRLF)
