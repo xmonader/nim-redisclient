@@ -1830,7 +1830,7 @@ function main() {
 <dt><pre><span class="Keyword">proc</span> <span class="Identifier">open</span><span class="Other">(</span><span class="Identifier">host</span> <span class="Other">=</span> <span class="StringLit">&quot;localhost&quot;</span><span class="Other">;</span> <span class="Identifier">port</span> <span class="Other">=</span> <span class="DecNumber">6379</span><span class="Other">.</span><span class="Identifier">Port</span><span class="Other">;</span> <span class="Identifier">ssl</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span> <span class="Identifier">timeout</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <a href="redisclient.html#Redis"><span class="Identifier">Redis</span></a> <span><span class="Other">{</span><span class="Other pragmadots">...</span><span class="Other">}</span></span><span class="pragmawrap"><span class="Other">{.</span><span class="pragma">
     <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">SslError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadIOEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+Open an asynchronous connection to a redis server.
 
 </dd>
 <a id="openAsync,string,int"></a>
@@ -1858,7 +1858,7 @@ Open an asynchronous connection to a redis server.
 <dt><pre><span class="Keyword">proc</span> <span class="Identifier">execCommand</span><span class="Other">(</span><span class="Identifier">this</span><span class="Other">:</span> <a href="redisclient.html#AsyncRedis"><span class="Identifier">AsyncRedis</span></a><span class="Other">;</span> <span class="Identifier">command</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">args</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span>
     <span class="Identifier">RedisValue</span><span class="Other">]</span> <span><span class="Other">{</span><span class="Other pragmadots">...</span><span class="Other">}</span></span><span class="pragmawrap"><span class="Other">{.</span><span class="pragma"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">FutureError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+execute command <cite>command</cite> with arguments seq <cite>args</cite>
 
 </dd>
 <a id="execCommand,Redis,string,seq[string]"></a>
@@ -1866,14 +1866,14 @@ Open an asynchronous connection to a redis server.
     <span class="Identifier">SslError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">TimeoutError</span><span class="Other">,</span> <span class="Identifier">OverflowError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+execute command <cite>command</cite> with arguments seq <cite>args</cite>
 
 </dd>
 <a id="execCommand,AsyncRedis,string"></a>
 <dt><pre><span class="Keyword">proc</span> <span class="Identifier">execCommand</span><span class="Other">(</span><span class="Identifier">this</span><span class="Other">:</span> <a href="redisclient.html#AsyncRedis"><span class="Identifier">AsyncRedis</span></a><span class="Other">;</span> <span class="Identifier">command</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">RedisValue</span><span class="Other">]</span> <span><span class="Other">{</span><span class="Other pragmadots">...</span><span class="Other">}</span></span><span class="pragmawrap"><span class="Other">{.</span><span class="pragma">
     <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">FutureError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+exxecute command string
 
 </dd>
 <a id="execCommand,Redis,string"></a>
@@ -1881,7 +1881,7 @@ Open an asynchronous connection to a redis server.
     <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">TimeoutError</span><span class="Other">,</span> <span class="Identifier">OverflowError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+exxecute command string
 
 </dd>
 <a id="execCommand,AsyncRedis,string,string"></a>
@@ -1918,21 +1918,21 @@ Open an asynchronous connection to a redis server.
 <dt><pre><span class="Keyword">proc</span> <span class="Identifier">enqueueCommand</span><span class="Other">(</span><span class="Identifier">this</span><span class="Other">:</span> <a href="redisclient.html#AsyncRedis"><span class="Identifier">AsyncRedis</span></a><span class="Other">;</span> <span class="Identifier">command</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">args</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">void</span><span class="Other">]</span> <span><span class="Other">{</span><span class="Other pragmadots">...</span><span class="Other">}</span></span><span class="pragmawrap"><span class="Other">{.</span><span class="pragma">
     <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">FutureError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+enqueue command to redis pipeline
 
 </dd>
 <a id="enqueueCommand,Redis,string,seq[string]"></a>
 <dt><pre><span class="Keyword">proc</span> <span class="Identifier">enqueueCommand</span><span class="Other">(</span><span class="Identifier">this</span><span class="Other">:</span> <a href="redisclient.html#Redis"><span class="Identifier">Redis</span></a><span class="Other">;</span> <span class="Identifier">command</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">args</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">void</span> <span><span class="Other">{</span><span class="Other pragmadots">...</span><span class="Other">}</span></span><span class="pragmawrap"><span class="Other">{.</span><span class="pragma"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+enqueue command to redis pipeline
 
 </dd>
 <a id="commitCommands,AsyncRedis"></a>
 <dt><pre><span class="Keyword">proc</span> <span class="Identifier">commitCommands</span><span class="Other">(</span><span class="Identifier">this</span><span class="Other">:</span> <a href="redisclient.html#AsyncRedis"><span class="Identifier">AsyncRedis</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">RedisValue</span><span class="Other">]</span> <span><span class="Other">{</span><span class="Other pragmadots">...</span><span class="Other">}</span></span><span class="pragmawrap"><span class="Other">{.</span><span class="pragma"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">FutureError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+execute pipeline commands
 
 </dd>
 <a id="commitCommands,Redis"></a>
@@ -1940,7 +1940,7 @@ Open an asynchronous connection to a redis server.
     <span class="Identifier">OverflowError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">,</span> <span class="Identifier">TimeoutError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span></span><span class="Other">.}</span></span></pre></dt>
 <dd>
-
+execute pipeline commands
 
 </dd>
 <a id="del,AsyncRedis,seq[string]"></a>
@@ -3769,7 +3769,7 @@ Make the server a slave of another instance, or promote it as master
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br/>
-        <small>Made with Nim. Generated: 2019-04-27 05:25:04 UTC</small>
+        <small>Made with Nim. Generated: 2019-04-27 05:28:18 UTC</small>
       </div>
     </div>
   </div>

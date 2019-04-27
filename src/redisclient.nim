@@ -23,6 +23,7 @@ when defined(ssl):
     ctx.wrapSocket(redis.socket)
 
 proc open*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Redis =
+  ## Open an asynchronous connection to a redis server.
   result = Redis(
     socket: newSocket(buffered = true),
   )
@@ -117,6 +118,8 @@ proc readForm(this:Redis|AsyncRedis): Future[string] {.multisync.} =
 
 
 proc execCommand*(this: Redis|AsyncRedis, command: string, args:seq[string]): Future[RedisValue] {.multisync.} =
+  ## execute command `command` with arguments seq `args`
+
   let cmdArgs = concat(@[command], args)
   var cmdAsRedisValues = newSeq[RedisValue]()
   for cmd in cmdArgs:
@@ -129,6 +132,7 @@ proc execCommand*(this: Redis|AsyncRedis, command: string, args:seq[string]): Fu
 
 
 proc execCommand*(this: Redis|AsyncRedis, command: string): Future[RedisValue] {.multisync.} =
+  ## exxecute command string
   return await execCommand(this, command, @[])
       
 
@@ -141,6 +145,7 @@ proc execCommand*(this: Redis|AsyncRedis, command: string, arg1:string, args:seq
 
 
 proc enqueueCommand*(this:Redis|AsyncRedis, command:string, args: seq[string]): Future[void] {.multisync.} = 
+  ## enqueue command to redis pipeline
   let cmdArgs = concat(@[command], args)
   var cmdAsRedisValues = newSeq[RedisValue]()
   for cmd in cmdArgs:
@@ -149,6 +154,7 @@ proc enqueueCommand*(this:Redis|AsyncRedis, command:string, args: seq[string]): 
   this.pipeline.add(arr)
 
 proc commitCommands*(this:Redis|AsyncRedis) : Future[RedisValue] {.multisync.} =
+  ## execute pipeline commands
   for cmd in this.pipeline:
     await this.socket.send(cmd.encode())
   var responses = newSeq[RedisValue]()
