@@ -47,19 +47,18 @@ proc testHighlevelAPI() =
   discard con.setk("username", "ahmed")
   echo con.get("username")
 
-proc testZdbAPI() {.async.} =
-  let con = await openAsync("localhost", 9900.Port)
-  echo await con.ping()
-  echo await con.execCommand("SET", @["username", "ahmed"])
-  echo await con.get("username")
+# proc testZdbAPI() {.async.} =
+#   let con = await openAsync("localhost", 9900.Port)
+#   echo await con.ping()
+#   echo await con.execCommand("SET", @["username", "ahmed"])
+#   echo await con.get("username")
 
-  for i in countup(1, 100):
-    await con.execCommand("SET", @["key"& $i, $i])
-  echo await con.zdbScan("key2")
-
-# testSync()
-# waitFor testAsync()
-# testHighlevelAPI()
-waitFor testZdbAPI()
+#   for i in countup(1, 100):
+#     await con.execCommand("SET", @["key"& $i, $i])
+#   echo await con.zdbScan("key2")
+testSync()
+waitFor testAsync()
+testHighlevelAPI()
+# waitFor testZdbAPI()
 
 
