@@ -4,7 +4,6 @@ Provides sync and async clients to communicate with redis servers using [nim-red
 
 ## Executing commands
 
-
 ### Sync
 
 ```nim
@@ -33,9 +32,8 @@ Provides sync and async clients to communicate with redis servers using [nim-red
   await con.enqueueCommand("PING", @[])
   await con.enqueueCommand("PING", @[])
   echo await con.commitCommands()
- 
-```
 
+```
 
 ## Pipelining
 You can use `enqueueCommand` and `commitCommands` to make use of redis pipelining
@@ -43,8 +41,24 @@ You can use `enqueueCommand` and `commitCommands` to make use of redis pipelinin
   con.enqueueCommand("PING", @[])
   con.enqueueCommand("PING", @[])
   con.enqueueCommand("PING", @[])
-  
+
   echo $con.commitCommands()
+```
+
+## Connection Pool
+There is a simple connection pool included - which was a folk of zedeus's [redpool](https://github.com/zedeus/redpool)
+```nim
+import redisclient, redisclient/connpool
+proc main {.async.} =
+    let pool = await newAsyncRedisPool(1)
+    let conn = await pool.acquire()
+    echo await conn.ping()
+    pool.release(conn)
+
+    pool.withAcquire(conn2):
+      echo await conn2.ping()
+    await pool.close()
+waitFor main()
 ```
 
 
