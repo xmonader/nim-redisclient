@@ -103,6 +103,8 @@ proc readForm(this:Redis|AsyncRedis): Future[string] {.multisync.} =
   var form = ""
   while true:
     let b = await this.receiveManaged()
+    if unlikely(b.len == 0):
+      break
     form &= b
     case b[0]
     of '+', '-', ':':
