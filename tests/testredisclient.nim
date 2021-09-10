@@ -1,9 +1,9 @@
 
-import strformat, tables, json, strutils, sequtils, hashes, net, asyncdispatch, asyncnet, os, strutils, parseutils, deques, options
+import strutils, net, asyncdispatch
 
 import redisparser, redisclient
 
-proc testSync() = 
+proc testSync() =
   let con = open("localhost", 6379.Port)
   echo $con.execCommand("PING", @[])
 
@@ -38,7 +38,7 @@ proc testAsync() {.async.} =
   await con.enqueueCommand("PING", @[])
   await con.enqueueCommand("PING", @[])
   echo await con.commitCommands()
- 
+
 
 
 proc testHighlevelAPI() =

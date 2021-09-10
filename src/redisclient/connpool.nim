@@ -6,8 +6,6 @@ from net import Port
 ## https://github.com/zedeus/redpool
 
 type
-  ConnectionError* = object of IOError
-
   RedisConn[T: Redis|AsyncRedis] = ref object
     active: bool
     conn: T
