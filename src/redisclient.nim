@@ -1,13 +1,15 @@
 # redisclient
 # Copyright Ahmed T. Youssef
 # nim redis client
-import redisparser, tables, json, strutils, sequtils, net, asyncdispatch, asyncnet, os, strutils, deques, options, net
-export redisparser
 
-const
-  CRLF* = "\r\n"
+import strutils, sequtils, net, asyncdispatch, asyncnet
+import redisparser except `$`
+export redisparser except `$`
 
 type
+  RedisError* = object of IOError
+  ConnectionError* = object of RedisError
+
   RedisBase[TSocket] = ref object of RootObj
     socket: TSocket
     connected: bool
@@ -24,30 +26,12 @@ type
     channel*: string
     message*: string
 
-proc `[]`*(obj: RedisValue, idx: int): RedisValue =
-  if obj.kind != vkArray:
-    raise newException(ValueError, "Invalid RedisValue kind, vkArray expected, got " & $obj.kind)
-  result = obj.l[idx]
-
-proc len*(obj: RedisValue): int =
-  case obj.kind
-  of vkStr:
-    result = obj.s.len
-  of vkError:
-    result = obj.err.len
-  of vkBulkStr:
-    result = obj.bs.len
-  of vkArray:
-    result = obj.l.len
-  else:
-    raise newException(ValueError, "Invalid kind: " & $obj.kind)
-
 when defined(ssl):
   proc SSLifyRedisConnectionNoVerify(redis: var Redis|AsyncRedis) =
     let ctx = newContext(verifyMode=CVerifyNone)
     ctx.wrapSocket(redis.socket)
 
-proc open*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Redis =
+proc open*(host = "localhost", port = 6379.Port, ssl=false, timeout = -1): Redis =
   ## Open an asynchronous connection to a redis server.
   result = Redis(
     socket: newSocket(buffered = true),
@@ -60,7 +44,7 @@ proc open*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Redis =
   result.socket.connect(host, port)
   result.connected = true
 
-proc openAsync*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Future[AsyncRedis] {.async.} =
+proc openAsync*(host = "localhost", port = 6379.Port, ssl=false, timeout = -1): Future[AsyncRedis] {.async.} =
   ## Open an asynchronous connection to a redis server.
   result = AsyncRedis(
     socket: newAsyncSocket(buffered = true),
@@ -76,58 +60,53 @@ proc openAsync*(host = "localhost", port = 6379.Port, ssl=false, timeout=0): Fut
 proc receiveManaged*(this:Redis|AsyncRedis, size=1): Future[string] {.multisync.} =
   result = newString(size)
   when this is Redis:
-    if this.timeout == 0:
-      discard this.socket.recv(result, size)
-    else:
-      discard this.socket.recv(result, size, this.timeout)
+    discard this.socket.recv(result, size, this.timeout)
   else:
     discard await this.socket.recvInto(addr result[0], size)
   return result
 
-proc readStream(this:Redis|AsyncRedis, breakAfter:string): Future[string] {.multisync.} =
-  var data = ""
-  while true:
-    if data.endsWith(breakAfter):
-      break
-    let strRead = await this.receiveManaged()
-    data &= strRead
-  return data
+proc receiveLineManaged(this: Redis | AsyncRedis): Future[string] {.multisync.} =
+  when this is Redis:
+    result = recvLine(this.socket, this.timeout)
+  else:
+    result = await recvLine(this.socket)
 
-proc readMany(this:Redis|AsyncRedis, count:int=1): Future[string] {.multisync.} =
-  if count == 0:
-    return ""
-  let data = await this.receiveManaged(count)
-  return data
+proc readForm(this:Redis|AsyncRedis): Future[RedisValue] {.multisync.} =
+  let data  = await this.receiveLineManaged()
+  if unlikely(data.len == 0):
+    raise newException(ConnectionError, "Connection closed.")
 
-proc readForm(this:Redis|AsyncRedis): Future[string] {.multisync.} =
-  var form = ""
-  while true:
-    let b = await this.receiveManaged()
-    if unlikely(b.len == 0):
-      break
-    form &= b
-    case b[0]
-    of '+', '-', ':':
-      form &= await this.readStream(CRLF)
-      return form
-    of '$':
-      let bulklenstr = await this.readStream(CRLF)
-      let bulklenI = parseInt(bulklenstr.strip())
-      form &= bulklenstr
-      if bulklenI > 0:
-        form &= await this.readMany(bulklenI)
-        form &= await this.readStream(CRLF)
-      return form
-    of '*':
-      let lenstr = await this.readStream(CRLF)
-      form &= lenstr
-      let lenstrAsI = parseInt(lenstr.strip())
-      for i in countup(1, lenstrAsI):
-        form &= await this.readForm()
-      return form
-    else:
-      discard
-  return form
+  let b = data[0]
+  if b notin ['+', '-', ':', '$', '*']:
+    raise newException(RedisError, "Protocol Error: " & data.repr)
+
+  case b
+  of '+':
+    result = newRedisString(data.substr(1))
+  of '-':
+    result = newRedisError(data.substr(1))
+  of ':':
+    result = newRedisInt(parseInt(data.substr(1)))
+  of '$':
+    let bulkLen = parseInt(data.substr(1))
+    if bulkLen == 0:
+      result = newRedisBulkString()
+    elif bulkLen > 0:
+      let body = await this.receiveManaged(bulkLen)
+      result = newRedisBulkString(body)
+      discard await this.receiveManaged(CRLF_LEN)
+  of '*':
+    let arraySize = parseInt(data.substr(1))
+    if arraySize == 0:
+      result = newRedisArray()
+    elif arraySize > 0:
+      var items: seq[RedisValue]
+      for i in 0..<arraySize:
+        let item = await this.readForm()
+        items.add(item)
+      result = newRedisArray(items)
+  else:
+    raise newException(RespError, "Unrecognized char " & b.repr)
 
 proc execCommand*(this: Redis|AsyncRedis, command: string, args:seq[string]): Future[RedisValue] {.multisync.} =
   ## execute command `command` with arguments seq `args`
@@ -135,11 +114,11 @@ proc execCommand*(this: Redis|AsyncRedis, command: string, args:seq[string]): Fu
   let cmdArgs = concat(@[command], args)
   var cmdAsRedisValues = newSeq[RedisValue]()
   for cmd in cmdArgs:
-    cmdAsRedisValues.add(RedisValue(kind:vkBulkStr, bs:cmd))
-  var arr = RedisValue(kind:vkArray, l: cmdAsRedisValues)
+    cmdAsRedisValues.add(newRedisBulkString(cmd))
+  var arr = newRedisArray(cmdAsRedisValues)
   await this.socket.send(encode(arr))
-  let form = await this.readForm()
-  result = decodeString(form)
+  result = await this.readForm()
+  #result = decodeString(form)
 
 proc execCommand*(this: Redis|AsyncRedis, command: string): Future[RedisValue] {.multisync.} =
   ## exxecute command string
@@ -156,8 +135,8 @@ proc enqueueCommand*(this:Redis|AsyncRedis, command:string, args: seq[string]): 
   let cmdArgs = concat(@[command], args)
   var cmdAsRedisValues = newSeq[RedisValue]()
   for cmd in cmdArgs:
-    cmdAsRedisValues.add(RedisValue(kind:vkBulkStr, bs:cmd))
-  var arr = RedisValue(kind:vkArray, l: cmdAsRedisValues)
+    cmdAsRedisValues.add(newRedisBulkString(cmd))
+  var arr = newRedisArray(cmdAsRedisValues)
   this.pipeline.add(arr)
 
 proc commitCommands*(this:Redis|AsyncRedis) : Future[RedisValue] {.multisync.} =
@@ -166,32 +145,33 @@ proc commitCommands*(this:Redis|AsyncRedis) : Future[RedisValue] {.multisync.} =
     await this.socket.send(cmd.encode())
   var responses = newSeq[RedisValue]()
   for i in countup(0, len(this.pipeline)-1):
-    responses.add(decodeString(await this.readForm()))
+    responses.add(await this.readForm())
   this.pipeline = @[]
-  return RedisValue(kind:vkArray, l:responses)
+  return newRedisArray(responses)
 
 
 ## HIGHER LEVEL INTERFACE
-proc del*(this: Redis | AsyncRedis, keys: seq[string]): Future[RedisValue] {.multisync.} =
+proc del*(this: Redis | AsyncRedis, keys: seq[string]): Future[int] {.multisync.} =
   ## Delete a key or multiple keys
-  return await this.execCommand("DEL", keys)
+  let val = await this.execCommand("DEL", keys)
+  result = val.getInt()
 
 proc exists*(this: Redis | AsyncRedis, key: string): Future[bool] {.multisync.} =
   ## Determine if a key exists
   let val = await this.execCommand("EXISTS", @[key])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc expire*(this: Redis | AsyncRedis, key: string, seconds: int): Future[bool] {.multisync.} =
   ## Set a key's time to live in seconds. Returns `false` if the key could
   ## not be found or the timeout could not be set.
   let val = await this.execCommand("EXPIRE", key, @[$seconds])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc expireAt*(this: Redis | AsyncRedis, key: string, timestamp: int): Future[bool] {.multisync.} =
   ## Set the expiration for a key as a UNIX timestamp. Returns `false`
   ## if the key could not be found or the timeout could not be set.
   let val = await this.execCommand("EXPIREAT", key, @[$timestamp])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc keys*(this: Redis | AsyncRedis, pattern: string): Future[RedisValue] {.multisync.} =
   ## Find all keys matching the given pattern
@@ -223,13 +203,13 @@ proc zdbScan*(this: Redis | AsyncRedis, position=""): Future[RedisValue] {.multi
 proc move*(this: Redis | AsyncRedis, key: string, db: int): Future[bool] {.multisync.} =
   ## Move a key to another database. Returns `true` on a successful move.
   let val =  await this.execCommand("MOVE", key, @[$db])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc persist*(this: Redis | AsyncRedis, key: string): Future[bool] {.multisync.} =
   ## Remove the expiration from a key.
   ## Returns `true` when the timeout was removed.
   let val = await  this.execCommand("PERSIST", key)
-  return val.i == 1
+  return val.getInt() == 1
 
 proc randomKey*(this: Redis | AsyncRedis): Future[RedisValue] {.multisync.} =
   ## Return a random key from the keyspace
@@ -245,7 +225,7 @@ proc renameNX*(this: Redis | AsyncRedis, key, newkey: string): Future[bool] {.mu
   ## Same as ``rename`` but doesn't continue if `newkey` exists.
   ## Returns `true` if key was renamed.
   let val = await this.execCommand("RENAMENX", key, @[newkey])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc ttl*(this: Redis | AsyncRedis, key: string): Future[RedisValue] {.multisync.} =
   ## Get the time to live for a key
@@ -334,7 +314,7 @@ proc setNX*(this: Redis | AsyncRedis, key, value: string): Future[bool] {.multis
   ## Set the value of a key, only if the key does not exist. Returns `true`
   ## if the key was set.
   let val = await this.execCommand("SETNX", key, @[value])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc setBit*(this: Redis | AsyncRedis, key: string, offset: int,
              value: string): Future[RedisValue] {.multisync.} =
@@ -360,12 +340,12 @@ proc strlen*(this: Redis | AsyncRedis, key: string): Future[RedisValue] {.multis
 proc hDel*(this: Redis | AsyncRedis, key, field: string): Future[bool] {.multisync.} =
   ## Delete a hash field at `key`. Returns `true` if the field was removed.
   let val =  await this.execCommand("HDEL", key, @[field])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc hExists*(this: Redis | AsyncRedis, key, field: string): Future[bool] {.multisync.} =
   ## Determine if a hash field exists.
   let val = await this.execCommand("HEXISTS", key, @[field])
-  result = val.i == 1
+  result = val.getInt() == 1
 
 proc hGet*(this: Redis | AsyncRedis, key, field: string): Future[RedisValue] {.multisync.} =
   ## Get the value of a hash field
@@ -534,9 +514,10 @@ proc sinterstore*(this: Redis | AsyncRedis, destination: string,
   ## Intersect multiple sets and store the resulting set in a key
   return await this.execCommand("SINTERSTORE", destination, keys)
 
-proc sismember*(this: Redis | AsyncRedis, key: string, member: string): Future[RedisValue] {.multisync.} =
+proc sismember*(this: Redis | AsyncRedis, key: string, member: string): Future[bool] {.multisync.} =
   ## Determine if a given value is a member of a set
-  return await this.execCommand("SISMEMBER", key, @[member])
+  let val = await this.execCommand("SISMEMBER", key, @[member])
+  return val.getInt() == 1
 
 proc smembers*(this: Redis | AsyncRedis, key: string): Future[RedisValue] {.multisync.} =
   ## Get all the members in a set
@@ -570,22 +551,24 @@ proc sunionstore*(this: Redis | AsyncRedis, destination: string,
 
 # Sorted sets
 
-proc zadd*(this: Redis | AsyncRedis, key: string, score: int, member: string): Future[RedisValue] {.multisync.} =
+proc zadd*(this: Redis | AsyncRedis, key: string, score: SomeInteger, member: string): Future[RedisValue] {.multisync.} =
   ## Add a member to a sorted set, or update its score if it already exists
   return await this.execCommand("ZADD", key, @[$score, member])
 
-proc zcard*(this: Redis | AsyncRedis, key: string): Future[RedisValue] {.multisync.} =
+proc zcard*(this: Redis | AsyncRedis, key: string): Future[int] {.multisync.} =
   ## Get the number of members in a sorted set
-  return await this.execCommand("ZCARD", key)
+  let val = await this.execCommand("ZCARD", key)
+  return val.getInt()
 
-proc zcount*(this: Redis | AsyncRedis, key: string, min: string, max: string): Future[RedisValue] {.multisync.} =
+proc zcount*(this: Redis | AsyncRedis, key: string, min: string, max: string): Future[int] {.multisync.} =
   ## Count the members in a sorted set with scores within the given values
-  return await this.execCommand("ZCOUNT", key, @[min, max])
+  let val = await this.execCommand("ZCOUNT", key, @[min, max])
+  return val.getInt()
 
-proc zincrby*(this: Redis | AsyncRedis, key: string, increment: string,
+proc zincrby*(this: Redis | AsyncRedis, key: string, increment: SomeInteger,
              member: string): Future[RedisValue] {.multisync.}  =
   ## Increment the score of a member in a sorted set
-  return await this.execCommand("ZINCRBY", key, @[increment, member])
+  return await this.execCommand("ZINCRBY", key, @[$increment, member])
 
 proc zinterstore*(this: Redis | AsyncRedis, destination: string, numkeys: string,
                  keys: seq[string], weights: seq[string] = @[],
@@ -608,23 +591,23 @@ proc zinterstore*(this: Redis | AsyncRedis, destination: string, numkeys: string
     args.add(aggregate)
   return await this.execCommand("ZINTERSTORE", args)
 
-proc zrange*(this: Redis | AsyncRedis, key: string, start: string, stop: string,
+proc zrange*(this: Redis | AsyncRedis, key: string, start: SomeInteger, stop: SomeInteger,
             withScores: bool = false): Future[RedisValue] {.multisync.} =
   ## Return a range of members in a sorted set, by index
+  var args = @[$start, $stop]
   if not withScores:
-    return await this.execCommand("ZRANGE", key, @[start, stop])
-  else:
-    return await this.execCommand("ZRANGE", key, @[start, stop, "WITHSCORES"])
+    args.add("WITHSCORES")
+  return await this.execCommand("ZRANGE", key, args)
 
-proc zrangebyscore*(this: Redis | AsyncRedis, key: string, min: string, max: string,
+proc zrangebyscore*(this: Redis | AsyncRedis, key: string, min: SomeInteger, max: SomeInteger,
                    withScores: bool = false, limit: bool = false,
                    limitOffset: int = 0, limitCount: int = 0): Future[RedisValue] {.multisync.} =
   ## Return a range of members in a sorted set, by score
   var args: seq[string]
   newSeq(args, 3 + (if withScores: 1 else: 0) + (if limit: 3 else: 0))
   args.add(key)
-  args.add(min)
-  args.add(max)
+  args.add($min)
+  args.add($max)
 
   if withScores: args.add("WITHSCORES")
   if limit:
@@ -634,15 +617,15 @@ proc zrangebyscore*(this: Redis | AsyncRedis, key: string, min: string, max: str
 
   return await this.execCommand("ZRANGEBYSCORE", args)
 
-proc zrangebylex*(this: Redis | AsyncRedis, key: string, start: string, stop: string,
+proc zrangebylex*(this: Redis | AsyncRedis, key: string, start: SomeInteger, stop: SomeInteger,
                   limit: bool = false, limitOffset: int = 0,
                   limitCount: int = 0): Future[RedisValue] {.multisync.} =
   ## Return a range of members in a sorted set, ordered lexicographically
   var args: seq[string]
   newSeq(args, 3 + (if limit: 3 else: 0))
   args.add(key)
-  args.add(start)
-  args.add(stop)
+  args.add($start)
+  args.add($stop)
   if limit:
     args.add("LIMIT")
     args.add($limitOffset)
@@ -657,26 +640,26 @@ proc zrem*(this: Redis | AsyncRedis, key: string, member: string): Future[RedisV
   ## Remove a member from a sorted set
   return await this.execCommand("ZREM", key, @[member])
 
-proc zremrangebyrank*(this: Redis | AsyncRedis, key: string, start: string,
-                     stop: string): Future[RedisValue] {.multisync.} =
+proc zremrangebyrank*(this: Redis | AsyncRedis, key: string, start: SomeInteger,
+                     stop: SomeInteger): Future[RedisValue] {.multisync.} =
   ## Remove all members in a sorted set within the given indexes
-  return await this.execCommand("ZREMRANGEBYRANK", key, @[start, stop])
+  return await this.execCommand("ZREMRANGEBYRANK", key, @[$start, $stop])
 
-proc zremrangebyscore*(this: Redis | AsyncRedis, key: string, min: string,
-                      max: string): Future[RedisValue] {.multisync.} =
+proc zremrangebyscore*(this: Redis | AsyncRedis, key: string, min: SomeInteger,
+                      max: SomeInteger): Future[RedisValue] {.multisync.} =
   ## Remove all members in a sorted set within the given scores
-  return await this.execCommand("ZREMRANGEBYSCORE", key, @[min, max])
+  return await this.execCommand("ZREMRANGEBYSCORE", key, @[$min, $max])
 
-proc zrevrange*(this: Redis | AsyncRedis, key: string, start: string, stop: string,
+proc zrevrange*(this: Redis | AsyncRedis, key: string, start: SomeInteger, stop: SomeInteger,
                withScores: bool = false): Future[RedisValue] {.multisync.} =
   ## Return a range of members in a sorted set, by index,
   ## with scores ordered from high to low
   if withScores:
-    return await this.execCommand("ZREVRANGE", key, @[start, stop, "WITHSCORES"])
+    return await this.execCommand("ZREVRANGE", key, @[$start, $stop, "WITHSCORES"])
   else:
-    return await this.execCommand("ZREVRANGE", key, @[start, stop])
+    return await this.execCommand("ZREVRANGE", key, @[$start, $stop])
 
-proc zrevrangebyscore*(this: Redis | AsyncRedis, key: string, min: string, max: string,
+proc zrevrangebyscore*(this: Redis | AsyncRedis, key: string, min: SomeInteger, max: SomeInteger,
                    withScores: bool = false, limit: bool = false,
                    limitOffset: int = 0, limitCount: int = 0): Future[RedisValue] {.multisync.} =
   ## Return a range of members in a sorted set, by score, with
@@ -684,8 +667,8 @@ proc zrevrangebyscore*(this: Redis | AsyncRedis, key: string, min: string, max: 
   var args: seq[string]
   newSeq(args, 3 + (if withScores: 1 else: 0) + (if limit: 3 else: 0))
   args.add(key)
-  args.add(min)
-  args.add(max)
+  args.add($min)
+  args.add($max)
 
   if withScores: args.add("WITHSCORES")
   if limit:
@@ -765,12 +748,12 @@ proc unsubscribe*(this: AsyncRedis, channels: seq[string]): Future[void] {.async
 
 proc nextMessage*(this: AsyncRedis): Future[RedisMessage] {.async.} =
   let
-    form = await this.readForm()
-    msg = decodeString(form)
-  assert $msg[0] == "message"
+    msg = await this.readForm()
+    #msg = decodeString(form)
+  assert msg[0].getStr() == "message"
   result = RedisMessage(
-    channel: $msg[1],
-    message: $msg[2]
+    channel: msg[1].getStr(),
+    message: msg[2].getStr()
   )
 # Transactions
 
@@ -895,7 +878,7 @@ proc slaveof*(this: Redis | AsyncRedis, host: string, port: string): Future[Redi
 
 # Streams
 
-proc xack*(r: Redis | AsyncRedis, key, group: string, ids: varargs[string, `$`]):Future[RedisValue] {.multisync.} =
+proc xack*(r: Redis | AsyncRedis, key, group: string, ids: varargs[string, `$`]): Future[RedisValue] {.multisync.} =
   ## Marks a pending message as correctly processed,
   ## effectively removing it from the pending entries list of the consumer group
   var args = @[group]
@@ -903,7 +886,7 @@ proc xack*(r: Redis | AsyncRedis, key, group: string, ids: varargs[string, `$`])
   return await r.execCommand("XACK", key, args)
 
 proc xadd*(r: Redis | AsyncRedis, key: string, fields: seq[tuple[field, value: string]], id = "*", maxlen: SomeInteger = 0,
-  minId = "", nomkstream = false, approximate = false, limit = 0):Future[RedisValue] {.multisync.} =
+  minId = "", nomkstream = false, approximate = false, limit = 0): Future[RedisValue] {.multisync.} =
   ## Appends new entries to a stream
   var args: seq[string]
   if nomkstream:
@@ -928,11 +911,11 @@ proc xadd*(r: Redis | AsyncRedis, key: string, fields: seq[tuple[field, value: s
   return await r.execCommand("XADD", key, args)
 
 proc xadd*(r: Redis | AsyncRedis, key: string, field, value: string, id = "*", maxlen: SomeInteger = 0,
-  minId = "", nomkstream = false, approximate = false, limit = 0):Future[RedisValue] {.multisync.} =
+  minId = "", nomkstream = false, approximate = false, limit = 0): Future[RedisValue] {.multisync.} =
   ## Appends a new entry to a stream
   result = await r.xadd(key, @[(field, value)], id, maxlen, minId, nomkstream, approximate, limit)
 
-proc xautoclaim*(r: Redis | AsyncRedis, key, group, consumer: string, minIdleTime: SomeInteger, start = "0", count: SomeInteger = 0, justId = false):Future[RedisValue] {.multisync.} =
+proc xautoclaim*(r: Redis | AsyncRedis, key, group, consumer: string, minIdleTime: SomeInteger, start = "0", count: SomeInteger = 0, justId = false): Future[RedisValue] {.multisync.} =
   ## Changes (or acquires) ownership of messages in a consumer group, as if the messages were delivered to the specified consumer.
   var args = @[group, consumer, $minIdleTime, start]
   if count > 0:
@@ -942,7 +925,7 @@ proc xautoclaim*(r: Redis | AsyncRedis, key, group, consumer: string, minIdleTim
     args.add("JUSTID")
   return await r.execCommand("XAUTOCLAIM", key, args)
 
-proc xclaim*(r: Redis | AsyncRedis, key, group, consumer: string, minIdleTime: SomeInteger, ids: seq[string], idle = 0, time = 0, retryCount: SomeInteger = 0, force = false, justId = false):Future[RedisValue] {.multisync.} =
+proc xclaim*(r: Redis | AsyncRedis, key, group, consumer: string, minIdleTime: SomeInteger, ids: seq[string], idle = 0, time = 0, retryCount: SomeInteger = 0, force = false, justId = false): Future[RedisValue] {.multisync.} =
   ## Changes (or acquires) ownership of a message in a consumer group, as if the message was delivered to the specified consumer.
   var args = @[group, consumer, $minIdleTime]
   args.add(ids)
@@ -961,63 +944,63 @@ proc xclaim*(r: Redis | AsyncRedis, key, group, consumer: string, minIdleTime: S
     args.add("JUSTID")
   return await r.execCommand("XCLAIM", key, args)
 
-proc xdel*(r: Redis | AsyncRedis, key: string, ids: varargs[string, `$`]):Future[RedisValue] {.multisync.} =
+proc xdel*(r: Redis | AsyncRedis, key: string, ids: varargs[string, `$`]): Future[RedisValue] {.multisync.} =
   ## Removes the specified entries from the stream. Returns the number of items actually deleted
   var args: seq[string]
   args.add(ids)
   return await r.execCommand("XDEL", key, args)
 
-proc xgroupCreate*(r: Redis | AsyncRedis, key, group: string, id = "$", mkstream = false):Future[RedisValue] {.multisync.} =
+proc xgroupCreate*(r: Redis | AsyncRedis, key, group: string, id = "$", mkstream = false): Future[RedisValue] {.multisync.} =
   ## Create a new consumer group.
   var args = @[key, group, id]
   if mkstream:
     args.add("MKSTREAM")
   return await r.execCommand("XGROUP", "CREATE", args)
 
-proc xgroupSetId*(r: Redis | AsyncRedis, key, group: string, id = "$"):Future[RedisValue] {.multisync.} =
+proc xgroupSetId*(r: Redis | AsyncRedis, key, group: string, id = "$"): Future[RedisValue] {.multisync.} =
   ## Set the current group ID.
   var args = @[key, group, id]
   return await r.execCommand("XGROUP", "SETID", args)
 
-proc xgroupDestroy*(r: Redis | AsyncRedis, key, group: string):Future[RedisValue] {.multisync.} =
+proc xgroupDestroy*(r: Redis | AsyncRedis, key, group: string): Future[RedisValue] {.multisync.} =
   ## Set the current group ID.
   var args = @[key, group]
   return await r.execCommand("XGROUP", "DESTROY", args)
 
-proc xgroupCreateConsumer*(r: Redis | AsyncRedis, key, group, consumer: string):Future[RedisValue] {.multisync.} =
+proc xgroupCreateConsumer*(r: Redis | AsyncRedis, key, group, consumer: string): Future[RedisValue] {.multisync.} =
   ## Set the current group ID.
   var args = @[key, group, consumer]
   return await r.execCommand("XGROUP", "CREATECONSUMER", args)
 
-proc xgroupDelConsumer*(r: Redis | AsyncRedis, key, group, consumer: string):Future[RedisValue] {.multisync.} =
+proc xgroupDelConsumer*(r: Redis | AsyncRedis, key, group, consumer: string): Future[RedisValue] {.multisync.} =
   ## Set the current group ID.
   var args = @[key, group, consumer]
   return await r.execCommand("XGROUP", "DELCONSUMER", args)
 
-proc xinfoConsumers*(r: Redis | AsyncRedis, key, group: string):Future[RedisValue] {.multisync.} =
+proc xinfoConsumers*(r: Redis | AsyncRedis, key, group: string): Future[RedisValue] {.multisync.} =
   ## Show consumers of ``groupname``
   var args = @[key, group]
   return await r.execCommand("XINFO", "CONSUMERS", args)
 
-proc xinfoGroups*(r: Redis | AsyncRedis, key: string):Future[RedisValue] {.multisync.} =
+proc xinfoGroups*(r: Redis | AsyncRedis, key: string): Future[RedisValue] {.multisync.} =
   ## Show consumers of ``groupname``
   var args = @[key]
   return await r.execCommand("XINFO", "GROUPS", args)
 
-proc xinfoStream*(r: Redis | AsyncRedis, key: string):Future[RedisValue] {.multisync.} =
+proc xinfoStream*(r: Redis | AsyncRedis, key: string): Future[RedisValue] {.multisync.} =
   ## Show consumers of ``groupname``
   var args = @[key]
   return await r.execCommand("XINFO", "STREAM", args)
 
-proc xinfoHelp*(r: Redis | AsyncRedis):Future[RedisValue] {.multisync.} =
+proc xinfoHelp*(r: Redis | AsyncRedis): Future[RedisValue] {.multisync.} =
   ## Show consumers of ``groupname``
   return await r.execCommand("XINFO", "HELP")
 
-proc xlen*(r: Redis | AsyncRedis, key: string):Future[RedisValue] {.multisync.} =
+proc xlen*(r: Redis | AsyncRedis, key: string): Future[RedisValue] {.multisync.} =
   ## Return the number of entries in a stream
   return await r.execCommand("XLEN", key)
 
-proc xpending*(r: Redis | AsyncRedis, key, group, start, stop = "", count: SomeInteger = 0, minIdleTime: SomeInteger = 0, consumer: string = ""):Future[RedisValue] {.multisync.} =
+proc xpending*(r: Redis | AsyncRedis, key, group, start, stop = "", count: SomeInteger = 0, minIdleTime: SomeInteger = 0, consumer: string = ""): Future[RedisValue] {.multisync.} =
   ## Return information and entries from a stream consumer group pending entries list, that are messages fetched but never acknowledged.
   var args = @[group]
   if minIdleTime > 0:
@@ -1030,7 +1013,7 @@ proc xpending*(r: Redis | AsyncRedis, key, group, start, stop = "", count: SomeI
 
   return await r.execCommand("XPENDING", key, args)
 
-proc xrange*(r: Redis | AsyncRedis, key, start = "-", stop = "+", count: SomeInteger = 0):Future[RedisValue] {.multisync.} =
+proc xrange*(r: Redis | AsyncRedis, key, start = "-", stop = "+", count: SomeInteger = 0): Future[RedisValue] {.multisync.} =
   ## Return a range of elements in a stream, with IDs matching the specified IDs interval
   var args = @[$start, $stop]
   if count > 0:
@@ -1038,7 +1021,7 @@ proc xrange*(r: Redis | AsyncRedis, key, start = "-", stop = "+", count: SomeInt
     args.add($count)
   return await r.execCommand("XRANGE", key, args)
 
-proc xread*(r: Redis | AsyncRedis, streams: seq[tuple[field, value: string]], count: SomeInteger = 0, blocking = 0):Future[RedisValue] {.multisync.} =
+proc xread*(r: Redis | AsyncRedis, streams: seq[tuple[field, value: string]], count: SomeInteger = 0, blocking = 0): Future[RedisValue] {.multisync.} =
   ## Return never seen elements in multiple streams, with IDs greater than the ones reported by the caller for each stream. Can block.
   var args: seq[string]
   if count > 0:
@@ -1055,7 +1038,7 @@ proc xread*(r: Redis | AsyncRedis, streams: seq[tuple[field, value: string]], co
   args.add(values)
   return await r.execCommand("XREAD", args)
 
-proc xreadGroup*(r: Redis | AsyncRedis, group, consumer: string, streams: seq[tuple[field, value: string]], count: SomeInteger = 0, blocking: SomeInteger = 0, noack = false):Future[RedisValue] {.multisync.} =
+proc xreadGroup*(r: Redis | AsyncRedis, group, consumer: string, streams: seq[tuple[field, value: string]], count: SomeInteger = 0, blocking: SomeInteger = 0, noack = false): Future[RedisValue] {.multisync.} =
   ## Return new entries from a stream using a consumer group, or access the history of the pending entries for a given consumer. Can block.
   var args = @["GROUP", group, consumer]
   if count > 0:
@@ -1074,7 +1057,7 @@ proc xreadGroup*(r: Redis | AsyncRedis, group, consumer: string, streams: seq[tu
   args.add(values)
   return await r.execCommand("XREADGROUP", args)
 
-proc xrevrange*(r: Redis | AsyncRedis, key, stop = "+", start = "-", count: SomeInteger = 0):Future[RedisValue] {.multisync.} =
+proc xrevrange*(r: Redis | AsyncRedis, key, stop = "+", start = "-", count: SomeInteger = 0): Future[RedisValue] {.multisync.} =
   ## Return a range of elements in a stream, with IDs matching the specified IDs interval,
   ## in reverse order (from greater to smaller IDs) compared to XRANGE
   var args = @[$stop, $start]
@@ -1083,7 +1066,7 @@ proc xrevrange*(r: Redis | AsyncRedis, key, stop = "+", start = "-", count: Some
     args.add($count)
   return await r.execCommand("XREVRANGE", key, args)
 
-proc xtrim*(r: Redis | AsyncRedis, key: string, maxlen: SomeInteger = 0, minId = "", nomkstream = false, approximate = false, limit = 0):Future[RedisValue] {.multisync.} =
+proc xtrim*(r: Redis | AsyncRedis, key: string, maxlen: SomeInteger = 0, minId = "", nomkstream = false, approximate = false, limit = 0): Future[RedisValue] {.multisync.} =
   ## Trims the stream to (approximately if '~' is passed) a certain size
   var args: seq[string]
   if maxlen > 0:
